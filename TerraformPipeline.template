@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Serverless deployment pipeline for Terraform projects
+Parameters:
+  S3Bucket:
+    Default: ''
+    Description: The name of the S3 bucket that contains the source artifact, which must be in the same region as this stack
+    Type: String
+  SourceS3Key:
+    Default: ''
+    Description: The file name of the source artifact, such as myfolder/myartifact.zip
+    Type: String
+  TerraformVersion:
+    Type: String
+    Default: 0.11.11
+    Description: The Terraform version to use
+  TerraformSha256:
+    Type: String
+    Default: 94504f4a67bad612b5c8e3a4b7ce6ca2772b3c1559630dfd71e9c519e3d6149c
+    Description: SHA256 checksum for Terraform v0.11.11
+  TerraformPlanCommands:
+    Type: String
+    Default: 'echo "terraform plan"'
+    Description: Terraform plan command
+  TerraformApplyCommands:
+    Type: String
+    Default: 'echo "terraform apply"'
+    Description: Terraform apply command
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Source Code S3 Bucket
+        Parameters:
+          - S3Bucket
+          - SourceS3Key
+      - Label:
+          default: Terraform Installation Version
+        Parameters:
+          - TerraformVersion
+          - TerraformSha256
+      - Label:
+          default: Terraform Commands
+        Parameters:
+          - TerraformPlanCommands
+          - TerraformApplyCommands
+Resources:
+  TerraformStateBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      AccessControl: BucketOwnerFullControl
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Location: !Ref ArtifactStoreBucket
+        Type: S3
+      Stages:
+        - Name: S3Source
+          Actions:
+            - Name: TemplateSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: S3
+                Version: '1'
+              Configuration:
+                S3Bucket: !Ref 'S3Bucket'
+                S3ObjectKey: !Ref 'SourceS3Key'
+              OutputArtifacts:
+                - Name: SourceOutput
+              RunOrder: 1
+        
+        - Name: TerraformPlan
+          Actions:
+          - Name: InvokeTerraformAction
+            ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+            OutputArtifacts:
+              - Name: TerraformPlanOutput
+            InputArtifacts:
+              - Name: SourceOutput
+            Configuration:
+                ProjectName: !Ref InvokeTerraformPlan
+
+        - Name: TerraformApply
+          Actions:
+          - Name: InvokeTerraformAction
+            ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+            OutputArtifacts:
+              - Name: TerraformApplyOutput
+            InputArtifacts:
+              - Name: TerraformPlanOutput
+            Configuration:
+                ProjectName: !Ref InvokeTerraformApply
+            RunOrder: 1
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codepipeline.amazonaws.com
+          Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+  InvokeTerraformPlan:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/eb-go-1.5-amazonlinux-64:2.1.3
+        Type: LINUX_CONTAINER
+      Name: !Sub ${AWS::StackName}-InvokeTerraformPlan
+      ServiceRole: !Ref InvokeTerraformRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.1
+          phases:
+            install:
+              commands:
+                - yum -y install jq
+                - cd /tmp && curl -o terraform.zip https://releases.hashicorp.com/terraform/${TerraformVersion}/terraform_${TerraformVersion}_linux_amd64.zip && echo "${TerraformSha256} terraform.zip" | sha256sum -c --quiet && unzip terraform.zip && mv terraform /usr/bin
+            build:
+              commands:
+                - ${TerraformPlanCommands}
+
+  InvokeTerraformApply:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/eb-go-1.5-amazonlinux-64:2.1.3
+        Type: LINUX_CONTAINER
+      Name: !Sub ${AWS::StackName}-InvokeTerraformApply
+      ServiceRole: !Ref InvokeTerraformRole
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub |
+          version: 0.1
+          phases:
+            install:
+              commands:
+                - yum -y install jq
+                - cd /tmp && curl -o terraform.zip https://releases.hashicorp.com/terraform/${TerraformVersion}/terraform_${TerraformVersion}_linux_amd64.zip && echo "${TerraformSha256} terraform.zip" | sha256sum -c --quiet && unzip terraform.zip && mv terraform /usr/bin
+            build:
+              commands:
+                - ${TerraformApplyCommands}
+
+  InvokeTerraformRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            Service: codebuild.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      Policies:
+        - PolicyName: "iam"
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement: 
+              - 
+                Effect: "Allow"
+                Action: "iam:*"
+                Resource: "*"
