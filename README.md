@@ -4,4 +4,4 @@ This project borrows and merges concepts and cloudformation templates from [Inte
 
 [BitbucketToS3PipelineSource.template](./BitbucketToS3PipelineSource.template) uses AWS Quickstart to integrate an external git scm (ex: Bitbucket) as a [AWS CodePipeline](https://console.aws.amazon.com/codesuite/codepipeline/home?region=us-east-1) source to kick off builds.
 
-[TerraformPipeline.template](./TerraformPipeline.template) sets up an AWS CodePipeline to trigger on updates to a source bucket defined by [BitbucketToS3PipelineSource.template](./BitbucketToS3PipelineSource.template). The convention is to run a terraform plan then apply. This process may be updated to include a manual approval between the `plan` and `build` stages.
+[TerraformPipeline.template](./TerraformPipeline.template) sets up an AWS CodePipeline pipeline to trigger on updates to a source bucket defined by [BitbucketToS3PipelineSource.template](./BitbucketToS3PipelineSource.template). The convention is to run a terraform plan then apply. This process may be updated to include a manual approval between the `plan` and `build` stages.
